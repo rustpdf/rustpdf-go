@@ -1,0 +1,7 @@
+# Go build cruft
+*.test
+*.out
+out.pdf
+
+# OS
+.DS_Store
