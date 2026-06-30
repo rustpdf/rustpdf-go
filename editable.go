@@ -197,22 +197,73 @@ func (e *EditableDoc) FieldNames() ([]string, error) {
 }
 
 // WatermarkText stamps a diagonal text watermark across every page (standard
-// Helvetica). rotationDeg is counter-clockwise; opacity in 0..=1.
-func (e *EditableDoc) WatermarkText(text string, size, r, g, b, opacity, rotationDeg float64) error {
+// Helvetica). rotationDeg is counter-clockwise; opacity in 0..=1. When
+// opaqueBackground is true the text is drawn over an opaque background box
+// (covering the underlying content) instead of being semi-transparent.
+func (e *EditableDoc) WatermarkText(text string, size, r, g, b, opacity, rotationDeg float64, opaqueBackground bool) error {
 	c := C.CString(text)
 	defer C.free(unsafe.Pointer(c))
+	ob := C.int(0)
+	if opaqueBackground {
+		ob = 1
+	}
 	return check(C.pdf_editable_watermark_text(
 		e.h, c, C.double(size), C.double(r), C.double(g), C.double(b),
-		C.double(opacity), C.double(rotationDeg)))
+		C.double(opacity), C.double(rotationDeg), ob))
+}
+
+// FillRect paints a filled rectangle at (x, y) sized width×height on page
+// pageIndex (0-based), in RGB color (r/g/b, each 0..=1) at opacity (0..=1), and
+// returns whether the page existed. Coordinates are in the page's visible space
+// (origin lower-left, y up) — the rectangle lands where a viewer sees it
+// regardless of the page's /Rotate.
+func (e *EditableDoc) FillRect(pageIndex int, x, y, width, height, r, g, b, opacity float64) bool {
+	var found C.int
+	C.pdf_editable_fill_rect(
+		e.h, C.int(pageIndex), C.double(x), C.double(y), C.double(width), C.double(height),
+		C.double(r), C.double(g), C.double(b), C.double(opacity), &found)
+	return found != 0
+}
+
+// PlaceText draws a line of text with its baseline at (x, y) on page pageIndex
+// (0-based), in standard Helvetica at size points and RGB color (each 0..=1),
+// and returns whether the page existed. rotationDeg rotates the text
+// counter-clockwise about its anchor (x, y). Coordinates are in the page's
+// visible space (origin lower-left, y up) — the text lands where a viewer sees
+// it regardless of the page's /Rotate.
+func (e *EditableDoc) PlaceText(pageIndex int, x, y float64, text string, size, r, g, b, rotationDeg float64) bool {
+	c := C.CString(text)
+	defer C.free(unsafe.Pointer(c))
+	var found C.int
+	C.pdf_editable_place_text(
+		e.h, C.int(pageIndex), C.double(x), C.double(y), c, C.double(size),
+		C.double(r), C.double(g), C.double(b), C.double(rotationDeg), &found)
+	return found != 0
 }
 
 // WatermarkImageFile stamps an image (JPEG/PNG file at path) centered on every
-// page at width×height points, at opacity.
-func (e *EditableDoc) WatermarkImageFile(path string, width, height, opacity float64) error {
+// page at width×height points, rotated rotationDeg degrees, at opacity.
+func (e *EditableDoc) WatermarkImageFile(path string, width, height, opacity, rotationDeg float64) error {
 	c := C.CString(path)
 	defer C.free(unsafe.Pointer(c))
 	return check(C.pdf_editable_watermark_image_file(
-		e.h, c, C.double(width), C.double(height), C.double(opacity)))
+		e.h, c, C.double(width), C.double(height), C.double(opacity), C.double(rotationDeg)))
+}
+
+// SetVersion sets the output PDF version (0 = 1.4, 1 = 1.5, 2 = 1.7, 3 = 2.0),
+// clearing any catalog /Version override.
+func (e *EditableDoc) SetVersion(version int) error {
+	return check(C.pdf_editable_set_version(e.h, C.int(version)))
+}
+
+// StripPdfa strips PDF/A conformance (catalog /OutputIntents, the XMP pdfaid
+// identifier and /Version) so the file is a plain PDF.
+func (e *EditableDoc) StripPdfa() error { return check(C.pdf_editable_strip_pdfa(e.h)) }
+
+// Normalize strips PDF/A and sets the output version (codes as in SetVersion),
+// producing a plain PDF.
+func (e *EditableDoc) Normalize(version int) error {
+	return check(C.pdf_editable_normalize(e.h, C.int(version)))
 }
 
 // Redact removes content under the given rectangles on page index (drawing a
